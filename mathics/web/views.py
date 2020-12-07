@@ -4,6 +4,13 @@
 import sys
 import traceback
 
+# networkx is used to format graphs. It is optional
+try:
+    import networkx as nx
+except:
+    nx = None
+
+
 from django.shortcuts import render
 from django.template import RequestContext, loader
 from django.http import (
@@ -44,13 +51,13 @@ class JsonResponse(HttpResponse):
         super(JsonResponse, self).__init__(response, content_type=JSON_CONTENT_TYPE)
 
 
-def require_ajax_login(func):
-    def new_func(request, *args, **kwargs):
-        if not request.user.is_authenticated():
-            return JsonResponse({"requireLogin": True})
-        return func(request, *args, **kwargs)
+# def require_ajax_login(func):
+#     def new_func(request, *args, **kwargs):
+#         if not request.user.is_authenticated():
+#             return JsonResponse({"requireLogin": True})
+#         return func(request, *args, **kwargs)
 
-    return new_func
+#     return new_func
 
 
 from mathics.settings import default_pymathics_modules
@@ -131,13 +138,28 @@ def query(request):
                 results.append(Result(evaluation.out, None, None))  # syntax errors
                 evaluation.out = []
                 continue
-            result = evaluation.evaluate(expr, timeout=settings.TIMEOUT)
-            if result is not None:
-                results.append(result)
-    except SystemExit as e:
+            # START HERE.
+            # Handle unformatted.
+            result = evaluation.evaluate(expr, timeout=settings.TIMEOUT, format="xml")
+            if str(result.last_eval) == "-Graph-":
+                # FIXME: we are getting a recursion error here
+                result.out = []
+                if not nx:
+                    result.result="-Graph-"
+                else:
+                    from mathics_django.web.format import format_graph
+                    svg_path = format_graph(result.last_eval.G)
+                    result.result="""<math><mi href="file://%s">Graph file://%s</mi></math>""" % (svg_path, svg_path)
+                    # result.result="""<img src="%s" alt="graph">""" % svg_path
+
+            results.append(result)  # syntax errors
+
+    except SystemExit:
         results = []
         result = None
-        definitions = Definitions(add_builtin=True, extension_modules=default_pymathics_modules)
+        definitions = Definitions(
+            add_builtin=True, extension_modules=default_pymathics_modules
+        )
         evaluation.definitions = definitions
     except Exception as exc:
         if settings.DEBUG and settings.DISPLAY_EXCEPTIONS:
